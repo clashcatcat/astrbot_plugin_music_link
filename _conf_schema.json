@@ -1,0 +1,310 @@
+{
+  "backend": {
+    "description": "默认后端",
+    "hint": "command6 为网易云旧逻辑，command9 为落月 API。",
+    "type": "string",
+    "default": "command9",
+    "options": [
+      "command9",
+      "command6"
+    ]
+  },
+  "render_mode": {
+    "description": "歌单展示方式",
+    "hint": "image 使用 Pillow 本地 PNG 渲染。",
+    "type": "string",
+    "default": "text",
+    "options": [
+      "text",
+      "image"
+    ]
+  },
+  "search_list_length": {
+    "description": "候选歌曲数量",
+    "hint": "当前版本没有分页，这个值就是每次返回多少首候选歌曲。",
+    "type": "int",
+    "default": 10
+  },
+  "wait_timeout_seconds": {
+    "description": "等待超时(秒)",
+    "type": "int",
+    "default": 45
+  },
+  "skip_song_list_selection": {
+    "description": "跳过选歌",
+    "hint": "开启后不等待输入序号，直接返回第一首歌曲。",
+    "type": "bool",
+    "default": false
+  },
+  "exit_words": {
+    "description": "退出关键词",
+    "hint": "多个关键词用英文逗号分隔。",
+    "type": "string",
+    "default": "0,不听了,退出"
+  },
+  "max_duration_seconds": {
+    "description": "最长时长(秒)",
+    "type": "int",
+    "default": 1800
+  },
+  "show_cover_image": {
+    "description": "旧配置，建议改用 output_fields 控制返回字段。",
+    "type": "bool",
+    "default": true,
+    "invisible": true
+  },
+  "include_lyric": {
+    "description": "旧配置，建议改用 output_fields 控制歌词字段。",
+    "type": "bool",
+    "default": false,
+    "invisible": true
+  },
+  "output_fields": {
+    "description": "详情返回字段",
+    "hint": "按顺序配置发送哪些字段，以及每个字段用文本、图片、音频还是文件发送。",
+    "type": "template_list",
+    "templates": {
+      "field": {
+        "name": "返回字段",
+        "hint": "按顺序配置详情返回内容。",
+        "items": {
+          "enable": {
+            "description": "启用",
+            "type": "bool",
+            "default": true
+          },
+          "data": {
+            "description": "字段",
+            "type": "string",
+            "default": "name",
+            "options": [
+              "name",
+              "artist",
+              "platform",
+              "album",
+              "quality",
+              "duration",
+              "url",
+              "pic",
+              "lrc",
+              "size",
+              "kbps",
+              "id"
+            ]
+          },
+          "describe": {
+            "description": "标签",
+            "type": "string",
+            "default": "歌曲"
+          },
+          "type": {
+            "description": "类型",
+            "type": "string",
+            "default": "text",
+            "options": [
+              "text",
+              "image",
+              "audio",
+              "file"
+            ]
+          }
+        }
+      }
+    },
+    "default": [
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "pic",
+        "describe": "封面",
+        "type": "image"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "name",
+        "describe": "歌曲",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "artist",
+        "describe": "歌手",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "platform",
+        "describe": "平台",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "album",
+        "describe": "专辑",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "quality",
+        "describe": "音质",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "duration",
+        "describe": "时长",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": true,
+        "data": "url",
+        "describe": "下载链接",
+        "type": "text"
+      },
+      {
+        "__template_key": "field",
+        "enable": false,
+        "data": "lrc",
+        "describe": "歌词",
+        "type": "text"
+      }
+    ]
+  },
+  "output_fields_json": {
+    "description": "旧版 JSON 字段配置，已废弃，仅用于兼容老配置。",
+    "type": "text",
+    "default": "",
+    "invisible": true
+  },
+  "download_files_before_send": {
+    "description": "文件先下载",
+    "hint": "当 output_fields 里使用 file 类型时，先下载到本地再发送。",
+    "type": "bool",
+    "default": false
+  },
+  "use_forward_for_primary": {
+    "description": "主内容合并转发",
+    "hint": "支持的平台上，把主内容包装成转发节点发送。当前建议在 OneBot/Satori 侧测试使用。",
+    "type": "bool",
+    "default": false
+  },
+  "enable_music_card": {
+    "description": "补发音乐卡片",
+    "hint": "在支持的平台上，主内容发送完成后额外补发一张音乐卡片。当前主要面向 OneBot。",
+    "type": "bool",
+    "default": false
+  },
+  "separate_media_fields": {
+    "description": "媒体拆开发送",
+    "hint": "开启后，文本和歌词先一起发，语音和文件后补发。",
+    "type": "bool",
+    "default": true
+  },
+  "keep_url_text_for_media": {
+    "description": "媒体保留链接",
+    "hint": "当 url 字段被配置成 audio/file 时，先发送一条链接文本，再补发语音或文件。",
+    "type": "bool",
+    "default": true
+  },
+  "lyric_preview_length": {
+    "description": "歌词预览长度",
+    "hint": "当字段 data=lrc 且 type=text 时，最多发送多少字符。",
+    "type": "int",
+    "default": 600
+  },
+  "svg_theme_color": {
+    "description": "主题色",
+    "type": "string",
+    "default": "#4f7cff"
+  },
+  "svg_scale": {
+    "description": "图片缩放",
+    "type": "float",
+    "default": 1.8
+  },
+  "svg_width": {
+    "description": "图片宽度",
+    "type": "int",
+    "default": 760
+  },
+  "svg_columns": {
+    "description": "图片列数",
+    "type": "int",
+    "default": 2
+  },
+  "svg_dark_mode": {
+    "description": "深色歌单",
+    "type": "bool",
+    "default": false
+  },
+  "svg_show_dividers": {
+    "description": "显示分隔线",
+    "type": "bool",
+    "default": true
+  },
+  "svg_show_song_background": {
+    "description": "显示歌曲底卡",
+    "type": "bool",
+    "default": true
+  },
+  "svg_show_version_info": {
+    "description": "显示版本信息",
+    "type": "bool",
+    "default": true
+  },
+  "font_path": {
+    "description": "字体路径",
+    "hint": "留空时会自动尝试系统中文字体。",
+    "type": "string",
+    "default": ""
+  },
+  "request_timeout_seconds": {
+    "description": "请求超时(秒)",
+    "type": "int",
+    "default": 20
+  },
+  "command6_used_api": {
+    "description": "command6 后端",
+    "hint": "command6 获取网易云下载链接时使用的后端站点。",
+    "type": "string",
+    "default": "api.injahow.cn",
+    "options": [
+      "api.injahow.cn",
+      "meting.jmstrand.cn",
+      "api.qijieya.cn",
+      "metingapi.nanorocky.top"
+    ]
+  },
+  "luoyue_api_base_url": {
+    "description": "落月 API 地址",
+    "type": "string",
+    "default": "https://api.vkeys.cn"
+  },
+  "command9_platform": {
+    "description": "command9 平台",
+    "type": "string",
+    "default": "aggregation",
+    "options": [
+      "aggregation",
+      "netease",
+      "tencent"
+    ]
+  },
+  "command9_netease_quality": {
+    "description": "网易云音质",
+    "type": "int",
+    "default": 4
+  },
+  "command9_qq_quality": {
+    "description": "QQ 音质",
+    "type": "int",
+    "default": 8
+  }
+}

@@ -271,7 +271,7 @@ class LocalSongListRenderer:
         padding = int(18 * scale)
         header_height = int(62 * scale)
         item_height = int(58 * scale)
-        footer_height = int((78 if show_version else 26) * scale)
+        footer_height = int((56 if show_version else 26) * scale)
         songs_per_col = max(1, math.ceil(len(songs) / columns))
         total_height = header_height + songs_per_col * item_height + footer_height + padding * 2
         height = max(int(180 * scale), total_height)
@@ -309,17 +309,23 @@ class LocalSongListRenderer:
             fill=self._blend_with_white(theme_color, 0.90 if not dark_mode else 0.82),
         )
 
-        draw.text((padding + int(16 * scale), padding + int(10 * scale)), "music-link 候选歌单", font=title_font, fill=theme_color)
-        draw.text(
+        self._draw_text(draw, (padding + int(16 * scale), padding + int(10 * scale)), "music-link 候选歌单", title_font, theme_color)
+        self._draw_text(
+            draw,
             (padding + int(16 * scale), padding + int(33 * scale)),
             f"关键词: {truncate_text(keyword, 36)}",
-            font=subtitle_font,
-            fill=sub_text_color,
+            subtitle_font,
+            sub_text_color,
         )
         total_text = f"共 {len(songs)} 首"
-        total_bbox = draw.textbbox((0, 0), total_text, font=subtitle_font)
-        total_w = total_bbox[2] - total_bbox[0]
-        draw.text((canvas_width - padding - int(16 * scale) - total_w, padding + int(10 * scale)), total_text, font=subtitle_font, fill=sub_text_color)
+        total_w, _ = self._measure_text(draw, total_text, subtitle_font)
+        self._draw_text(
+            draw,
+            (canvas_width - padding - int(16 * scale) - total_w, padding + int(10 * scale)),
+            total_text,
+            subtitle_font,
+            sub_text_color,
+        )
         draw.line(
             (
                 padding + int(14 * scale),
@@ -350,21 +356,23 @@ class LocalSongListRenderer:
             index_box = (x + int(10 * scale), y + int(14 * scale), x + int(34 * scale), y + int(38 * scale))
             draw.rounded_rectangle(index_box, radius=int(7 * scale), fill=self._blend_with_white(theme_color, 0.82 if not dark_mode else 0.45))
             index_text = str(index + 1)
-            index_bbox = draw.textbbox((0, 0), index_text, font=index_font)
-            index_w = index_bbox[2] - index_bbox[0]
-            index_h = index_bbox[3] - index_bbox[1]
-            draw.text(
-                (index_box[0] + (index_box[2] - index_box[0] - index_w) / 2, index_box[1] + (index_box[3] - index_box[1] - index_h) / 2 - int(1 * scale)),
+            index_w, index_h = self._measure_text(draw, index_text, index_font)
+            self._draw_text(
+                draw,
+                (
+                    index_box[0] + (index_box[2] - index_box[0] - index_w) / 2,
+                    index_box[1] + (index_box[3] - index_box[1] - index_h) / 2,
+                ),
                 index_text,
-                font=index_font,
-                fill=theme_color,
+                index_font,
+                theme_color,
             )
 
             text_x = x + int(42 * scale)
-            draw.text((text_x, y + int(8 * scale)), truncate_text(song.name, 18), font=song_font, fill=text_color)
-            draw.text((text_x, y + int(26 * scale)), truncate_text(song.artist, 22), font=meta_font, fill=sub_text_color)
+            self._draw_text(draw, (text_x, y + int(8 * scale)), truncate_text(song.name, 18), song_font, text_color)
+            self._draw_text(draw, (text_x, y + int(26 * scale)), truncate_text(song.artist, 22), meta_font, sub_text_color)
             if song.album:
-                draw.text((text_x, y + int(40 * scale)), truncate_text(song.album, 24), font=tag_font, fill=sub_text_color)
+                self._draw_text(draw, (text_x, y + int(40 * scale)), truncate_text(song.album, 24), tag_font, sub_text_color)
 
             tags: list[tuple[str, str, str]] = []
             if song.platform:
@@ -377,8 +385,7 @@ class LocalSongListRenderer:
 
             tag_right = x + int(card_width) - int(10 * scale)
             for tag_index, (tag_text, tag_color, tag_fill) in enumerate(tags[:3]):
-                bbox = draw.textbbox((0, 0), tag_text, font=tag_font)
-                text_w = bbox[2] - bbox[0]
+                text_w, text_h = self._measure_text(draw, tag_text, tag_font)
                 tag_width = max(int(34 * scale), min(int(72 * scale), text_w + int(14 * scale)))
                 tag_y = y + int(6 * scale) + tag_index * int(17 * scale)
                 draw.rounded_rectangle(
@@ -386,11 +393,15 @@ class LocalSongListRenderer:
                     radius=int(4 * scale),
                     fill=tag_fill,
                 )
-                draw.text(
-                    (tag_right - tag_width / 2 - text_w / 2, tag_y + int(1 * scale)),
+                self._draw_text(
+                    draw,
+                    (
+                        tag_right - tag_width / 2 - text_w / 2,
+                        tag_y + (int(14 * scale) - text_h) / 2,
+                    ),
                     tag_text,
-                    font=tag_font,
-                    fill=tag_color,
+                    tag_font,
+                    tag_color,
                 )
 
             if show_dividers:
@@ -412,10 +423,11 @@ class LocalSongListRenderer:
                 f"version: {PLUGIN_VERSION}",
                 f"date_time: {timestamp}",
             ]
-            start_y = height - int(56 * scale)
+            line_height = int(11 * scale)
+            start_y = height - padding - line_height * len(footer_lines) - int(10 * scale)
             for line in footer_lines:
                 draw.text((padding + int(8 * scale), start_y), line, font=footer_font, fill=watermark_color)
-                start_y += int(12 * scale)
+                start_y += line_height
 
         image.save(png_path, format="PNG")
 
@@ -454,6 +466,17 @@ class LocalSongListRenderer:
             int(g * (1 - ratio) + 255 * ratio),
             int(b * (1 - ratio) + 255 * ratio),
         )
+
+    @staticmethod
+    def _measure_text(draw, text: str, font) -> tuple[int, int]:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        return bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+    @staticmethod
+    def _draw_text(draw, position: tuple[float, float], text: str, font, fill) -> None:
+        bbox = draw.textbbox((0, 0), text, font=font)
+        x, y = position
+        draw.text((x, y - bbox[1]), text, font=font, fill=fill)
 
 
 class MusicService:

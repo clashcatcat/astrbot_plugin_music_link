@@ -47,18 +47,6 @@
     "type": "int",
     "default": 1800
   },
-  "show_cover_image": {
-    "description": "旧配置，建议改用 output_fields 控制返回字段。",
-    "type": "bool",
-    "default": true,
-    "invisible": true
-  },
-  "include_lyric": {
-    "description": "旧配置，建议改用 output_fields 控制歌词字段。",
-    "type": "bool",
-    "default": false,
-    "invisible": true
-  },
   "output_fields": {
     "description": "详情返回字段",
     "hint": "按顺序配置发送哪些字段，以及每个字段用文本、图片、音频还是文件发送。",
@@ -176,12 +164,6 @@
         "type": "text"
       }
     ]
-  },
-  "output_fields_json": {
-    "description": "旧版 JSON 字段配置，已废弃，仅用于兼容老配置。",
-    "type": "text",
-    "default": "",
-    "invisible": true
   },
   "download_files_before_send": {
     "description": "文件先下载",

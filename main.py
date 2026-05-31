@@ -166,6 +166,97 @@ class PlaySongMenuTool(FunctionTool[AstrAgentContext]):
         return ""
 
 
+@pydantic_dataclass
+class SearchSongCandidatesTool(FunctionTool[AstrAgentContext]):
+    plugin: Any = None
+    name: str = "search_song_candidates"
+    description: str = (
+        "当你需要替用户自动挑歌时，先调用这个工具搜索候选歌曲。它不会给用户发消息，只会把候选列表返回给你，"
+        "你看完结果后，再调用 play_song_direct 发送你认为最合适的那一首。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "song_name": {
+                    "type": "string",
+                    "description": "歌曲名称或包含来源的关键词，例如：来首七里香、qq音乐的搁浅、网易的晴天。",
+                },
+            },
+            "required": ["song_name"],
+        }
+    )
+
+    async def call(
+        self,
+        context: ContextWrapper[AstrAgentContext],
+        **kwargs,
+    ) -> ToolExecResult:
+        plugin = self.plugin
+        song_name = str(kwargs.get("song_name", "")).strip()
+        if not plugin or not song_name:
+            return "未提供歌曲关键词。"
+
+        keyword, force_platform = plugin._parse_ai_song_request(song_name)
+        if not keyword:
+            return "未能提取有效的歌曲关键词。"
+        return await plugin._search_song_candidates_for_llm(keyword, force_platform)
+
+
+@pydantic_dataclass
+class PlaySongDirectTool(FunctionTool[AstrAgentContext]):
+    plugin: Any = None
+    name: str = "play_song_direct"
+    description: str = (
+        "在你已经通过 search_song_candidates 看过候选列表后调用。根据你选定的候选序号，"
+        "直接把对应歌曲发送给用户，不展示候选菜单。工具已经直接给用户发消息，调用后不要额外重复回复。"
+    )
+    parameters: dict = Field(
+        default_factory=lambda: {
+            "type": "object",
+            "properties": {
+                "song_name": {
+                    "type": "string",
+                    "description": "和 search_song_candidates 相同的搜索关键词。",
+                },
+                "candidate_index": {
+                    "type": "integer",
+                    "description": "你从候选列表里选中的序号，从 1 开始。",
+                },
+            },
+            "required": ["song_name", "candidate_index"],
+        }
+    )
+
+    async def call(
+        self,
+        context: ContextWrapper[AstrAgentContext],
+        **kwargs,
+    ) -> ToolExecResult:
+        plugin = self.plugin
+        event = context.context.event
+        song_name = str(kwargs.get("song_name", "")).strip()
+        candidate_index = to_int(kwargs.get("candidate_index"), 0)
+        if not plugin or not song_name:
+            return "未提供歌曲关键词。"
+        if candidate_index < 1:
+            return "未提供有效的候选序号。"
+
+        keyword, force_platform = plugin._parse_ai_song_request(song_name)
+        if not keyword:
+            return "未能提取有效的歌曲关键词。"
+
+        asyncio.create_task(
+            plugin._send_song_by_index(
+                event,
+                keyword,
+                force_platform,
+                candidate_index,
+            )
+        )
+        return ""
+
+
 def truncate_text(text: Any, max_length: int) -> str:
     value = str(text or "")
     if len(value) <= max_length:
@@ -215,14 +306,6 @@ def parse_output_fields(raw: Any) -> list[dict[str, Any]]:
             normalized = dict(item)
             normalized.pop("__template_key", None)
             valid_items.append(normalized)
-        return valid_items or DEFAULT_OUTPUT_FIELDS
-    try:
-        parsed = json.loads(str(raw))
-    except json.JSONDecodeError:
-        logger.warning("output_fields_json 不是合法 JSON，回退默认字段配置")
-        return DEFAULT_OUTPUT_FIELDS
-    if isinstance(parsed, list):
-        valid_items = [item for item in parsed if isinstance(item, dict)]
         return valid_items or DEFAULT_OUTPUT_FIELDS
     return DEFAULT_OUTPUT_FIELDS
 
@@ -687,7 +770,11 @@ class MusicLinkPlugin(Star):
         self.config = config
         self.service = MusicService(config)
         self.song_list_renderer = LocalSongListRenderer("astrbot_plugin_music_link")
-        self.context.add_llm_tools(PlaySongMenuTool(plugin=self))
+        self.context.add_llm_tools(
+            PlaySongMenuTool(plugin=self),
+            SearchSongCandidatesTool(plugin=self),
+            PlaySongDirectTool(plugin=self),
+        )
 
     async def initialize(self):
         logger.info("astrbot_plugin_music_link 已初始化")
@@ -737,9 +824,7 @@ class MusicLinkPlugin(Star):
         detail: SongDetail,
     ) -> tuple[list[Comp.BaseMessageComponent], list[list[Comp.BaseMessageComponent]]]:
         field_map = detail.as_field_map()
-        specs = parse_output_fields(
-            self.config.get("output_fields") or self.config.get("output_fields_json")
-        )
+        specs = parse_output_fields(self.config.get("output_fields"))
         components: list[Comp.BaseMessageComponent] = []
         deferred_messages: list[list[Comp.BaseMessageComponent]] = []
         text_lines: list[str] = []
@@ -920,7 +1005,11 @@ class MusicLinkPlugin(Star):
     @music.command("pick")
     async def music_pick(self, event: AstrMessageEvent, keyword: str, index: int):
         """搜索歌曲并直接选择序号。"""
-        async for result in self._run_interactive_search(event, keyword, index):
+        normalized_index = to_int(index, 0)
+        if normalized_index < 1:
+            yield event.plain_result("请输入大于 0 的数字序号。")
+            return
+        async for result in self._run_interactive_search(event, keyword, normalized_index):
             yield result
 
     @music.command("id")
@@ -990,6 +1079,10 @@ class MusicLinkPlugin(Star):
             direct_index = 1
 
         if direct_index is not None:
+            direct_index = to_int(direct_index, 0)
+            if direct_index < 1:
+                yield event.plain_result("请输入有效的数字序号。")
+                return
             if direct_index < 1 or direct_index > len(songs):
                 yield event.plain_result(f"序号超出范围，请输入 1 到 {len(songs)}。")
                 return
@@ -1047,6 +1140,23 @@ class MusicLinkPlugin(Star):
         )
         keyword = re.sub(r"(歌曲|歌)\s*$", "", keyword).strip(" ，,。！？!?.")
         return keyword.strip(), force_platform
+
+    def _format_song_candidates_for_llm(self, keyword: str, songs: list[SongItem]) -> str:
+        lines = [f"搜索关键词: {keyword}", "候选歌曲列表:"]
+        for index, song in enumerate(songs, start=1):
+            tail = []
+            if song.platform_label:
+                tail.append(song.platform_label)
+            if song.quality:
+                tail.append(song.quality)
+            if song.duration_text:
+                tail.append(song.duration_text)
+            summary = " | ".join(tail)
+            album = f" | 专辑: {song.album}" if song.album else ""
+            suffix = f" | {summary}" if summary else ""
+            lines.append(f"{index}. {song.name} - {song.artist}{album}{suffix}")
+        lines.append("请选择最合适的一首，然后调用 play_song_direct 并传入对应的 candidate_index。")
+        return "\n".join(lines)
 
     async def _build_song_list_results(
         self,
@@ -1134,6 +1244,52 @@ class MusicLinkPlugin(Star):
         except Exception as exc:  # noqa: BLE001
             logger.error(f"AI 点歌会话异常: {exc}")
             await event.send(event.plain_result(f"点歌过程中出现异常: {exc}"))
+        finally:
+            event.stop_event()
+
+    async def _search_song_candidates_for_llm(
+        self,
+        keyword: str,
+        force_platform: str | None,
+    ) -> str:
+        backend = "command9" if force_platform else str(self.config.get("backend", "command9"))
+        limit = max(1, to_int(self.config.get("search_list_length"), 10))
+        songs = await self._search(keyword, backend, limit, force_platform=force_platform)
+        if not songs:
+            return f"没有找到与“{keyword}”匹配的歌曲。"
+        return self._format_song_candidates_for_llm(keyword, songs)
+
+    async def _send_song_by_index(
+        self,
+        event: AstrMessageEvent,
+        keyword: str,
+        force_platform: str | None,
+        candidate_index: int,
+    ) -> None:
+        backend = "command9" if force_platform else str(self.config.get("backend", "command9"))
+        limit = max(1, to_int(self.config.get("search_list_length"), 10))
+        try:
+            songs = await self._search(keyword, backend, limit, force_platform=force_platform)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"AI 直出点歌搜索失败: {exc}")
+            await event.send(event.plain_result(f"搜索失败: {exc}"))
+            return
+
+        if not songs:
+            await event.send(event.plain_result(f"没有找到与“{keyword}”匹配的歌曲。"))
+            return
+
+        if candidate_index < 1 or candidate_index > len(songs):
+            await event.send(event.plain_result(f"候选序号超出范围，请选择 1 到 {len(songs)}。"))
+            return
+
+        try:
+            selected_song = songs[candidate_index - 1]
+            detail = await self._pick_song(selected_song)
+            await self._send_detail_followups(event, detail)
+        except Exception as exc:  # noqa: BLE001
+            logger.error(f"AI 直出点歌失败: {exc}")
+            await event.send(event.plain_result(f"发送歌曲失败: {exc}"))
         finally:
             event.stop_event()
 

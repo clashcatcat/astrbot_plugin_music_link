@@ -36,6 +36,8 @@
 插件提供一个 LLM Tool：
 
 - `play_song_menu(song_name)`
+- `search_song_candidates(song_name)`
+- `play_song_direct(song_name, candidate_index)`
 
 它使用 AstrBot 最新的 `FunctionTool + add_llm_tools()` 方式注册。
 
@@ -49,9 +51,10 @@
 
 - 自动识别 `QQ音乐` / `QQ` / `腾讯` / `网易` / `网易云`
 - 自动切换到对应音源搜索
-- 只发送候选菜单
-- 不自动代替用户选歌
-- 用户继续发送序号后再返回歌曲详情
+- `play_song_menu` 只发送候选菜单，不自动代替用户选歌
+- `search_song_candidates` 只把候选歌曲列表返回给 LLM，不给用户发消息
+- `play_song_direct` 根据 LLM 选定的候选序号直接发送
+- 使用菜单工具时，用户继续发送序号后再返回歌曲详情
 
 ## 配置建议
 

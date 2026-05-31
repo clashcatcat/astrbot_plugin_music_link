@@ -1037,6 +1037,7 @@ class MusicLinkPlugin(Star):
         """搜索歌曲并直接选择序号。"""
         normalized_index = to_int(index, 0)
         if normalized_index < 1:
+            event.stop_event()
             yield event.plain_result("请输入大于 0 的数字序号。")
             return
         async for result in self._run_interactive_search(event, keyword, normalized_index):
@@ -1073,6 +1074,7 @@ class MusicLinkPlugin(Star):
                 yield result
         except Exception as exc:  # noqa: BLE001
             logger.error(f"ID 点歌失败: {exc}")
+            event.stop_event()
             yield event.plain_result(f"获取歌曲失败: {exc}")
 
     async def _run_interactive_search(
@@ -1084,6 +1086,7 @@ class MusicLinkPlugin(Star):
         force_platform: str | None = None,
     ):
         if not keyword.strip():
+            event.stop_event()
             yield event.plain_result("请输入歌曲名或歌曲 ID。")
             return
 
@@ -1098,10 +1101,12 @@ class MusicLinkPlugin(Star):
             songs = await self._search(keyword, backend, limit, force_platform=force_platform)
         except Exception as exc:  # noqa: BLE001
             logger.error(f"搜索失败: {exc}")
+            event.stop_event()
             yield event.plain_result(f"搜索失败: {exc}")
             return
 
         if not songs:
+            event.stop_event()
             yield event.plain_result("没有找到匹配的歌曲。")
             return
 
@@ -1111,17 +1116,21 @@ class MusicLinkPlugin(Star):
         if direct_index is not None:
             direct_index = to_int(direct_index, 0)
             if direct_index < 1:
+                event.stop_event()
                 yield event.plain_result("请输入有效的数字序号。")
                 return
             if direct_index < 1 or direct_index > len(songs):
+                event.stop_event()
                 yield event.plain_result(f"序号超出范围，请输入 1 到 {len(songs)}。")
                 return
             try:
                 detail = await self._pick_song(songs[direct_index - 1])
                 async for result in self._yield_detail_results(event, detail):
                     yield result
+                event.stop_event()
             except Exception as exc:  # noqa: BLE001
                 logger.error(f"直选歌曲详情失败: {exc}")
+                event.stop_event()
                 yield event.plain_result(f"获取歌曲详情失败: {exc}")
             return
 
@@ -1131,9 +1140,11 @@ class MusicLinkPlugin(Star):
         try:
             await self._wait_for_song_selection(event, songs)
         except TimeoutError:
+            event.stop_event()
             yield event.plain_result("点歌等待超时，已结束本次选择。")
         except Exception as exc:  # noqa: BLE001
             logger.error(f"选歌会话异常: {exc}")
+            event.stop_event()
             yield event.plain_result(f"选歌过程中出现异常: {exc}")
         finally:
             event.stop_event()

@@ -590,6 +590,9 @@ class MusicService:
         preview = self._preview_payload(payload)
         raise ValueError(f"{context}返回了非 JSON 对象: {preview or '空内容'}")
 
+    def _optional_mapping(self, payload: Any) -> dict[str, Any]:
+        return payload if isinstance(payload, dict) else {}
+
     async def search_command6(self, keyword: str, limit: int) -> list[SongItem]:
         api = (
             "http://music.163.com/api/search/get/web"
@@ -597,12 +600,19 @@ class MusicService:
             f"&type=1&offset=0&total=true&limit={limit}"
         )
         data = self._require_mapping(await self._get_json(api), "网易云搜索接口")
-        songs = ((data.get("result") or {}).get("songs") or [])
+        result = self._optional_mapping(data.get("result"))
+        songs = result.get("songs") or []
+        if not isinstance(songs, list):
+            raise ValueError(f"网易云搜索接口返回了异常 songs 字段: {self._preview_payload(songs)}")
         items: list[SongItem] = []
         for song in songs:
+            if not isinstance(song, dict):
+                logger.warning(f"网易云搜索结果里包含异常歌曲项: {self._preview_payload(song)}")
+                continue
             artists = "/".join(artist.get("name", "") for artist in song.get("artists", []))
             duration_seconds = to_int(song.get("duration"), 0) // 1000
-            album = (song.get("album") or {}).get("name", "")
+            album_data = self._optional_mapping(song.get("album"))
+            album = album_data.get("name", "")
             items.append(
                 SongItem(
                     song_id=str(song.get("id", "")),
@@ -614,7 +624,7 @@ class MusicService:
                     album=album,
                     duration_seconds=duration_seconds,
                     duration_text=format_duration(duration_seconds),
-                    cover=(song.get("album") or {}).get("picUrl", ""),
+                    cover=album_data.get("picUrl", ""),
                     quality="",
                     raw=song,
                 )
@@ -633,14 +643,18 @@ class MusicService:
 
         detail_data = self._require_mapping(await self._get_json(detail_api), "网易云详情接口")
         songs = detail_data.get("songs") or []
+        if not isinstance(songs, list):
+            raise ValueError(f"网易云详情接口返回了异常 songs 字段: {self._preview_payload(songs)}")
         if not songs:
             raise ValueError("网易云歌曲详情为空")
         song = songs[0]
+        if not isinstance(song, dict):
+            raise ValueError(f"网易云详情接口返回了异常歌曲项: {self._preview_payload(song)}")
 
         lyric_text = ""
         try:
             lyric_data = self._require_mapping(await self._get_json(lyric_api), "网易云歌词接口")
-            lyric_text = ((lyric_data.get("lrc") or {}).get("lyric", "") or "")
+            lyric_text = (self._optional_mapping(lyric_data.get("lrc")).get("lyric", "") or "")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"获取网易云歌词失败: {exc}")
 
@@ -650,7 +664,7 @@ class MusicService:
 
         artists = "/".join(artist.get("name", "") for artist in song.get("artists", []))
         duration_seconds = to_int(song.get("duration"), 0) // 1000
-        album_data = song.get("album") or {}
+        album_data = self._optional_mapping(song.get("album"))
         return SongDetail(
             song_id=str(song.get("id", "")),
             platform="netease",

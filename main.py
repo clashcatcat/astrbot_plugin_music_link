@@ -577,14 +577,27 @@ class MusicService:
             text = response.text.strip()
             return response.json() if text.startswith("{") or text.startswith("[") else text
 
+    @staticmethod
+    def _preview_payload(payload: Any, max_length: int = 120) -> str:
+        text = str(payload or "").replace("\n", " ").replace("\r", " ").strip()
+        if len(text) <= max_length:
+            return text
+        return text[: max_length - 3] + "..."
+
+    def _require_mapping(self, payload: Any, context: str) -> dict[str, Any]:
+        if isinstance(payload, dict):
+            return payload
+        preview = self._preview_payload(payload)
+        raise ValueError(f"{context}返回了非 JSON 对象: {preview or '空内容'}")
+
     async def search_command6(self, keyword: str, limit: int) -> list[SongItem]:
         api = (
             "http://music.163.com/api/search/get/web"
             f"?csrf_token=hlpretag=&hlposttag=&s={quote(keyword)}"
             f"&type=1&offset=0&total=true&limit={limit}"
         )
-        data = await self._get_json(api)
-        songs = ((data or {}).get("result") or {}).get("songs") or []
+        data = self._require_mapping(await self._get_json(api), "网易云搜索接口")
+        songs = ((data.get("result") or {}).get("songs") or [])
         items: list[SongItem] = []
         for song in songs:
             artists = "/".join(artist.get("name", "") for artist in song.get("artists", []))
@@ -618,16 +631,16 @@ class MusicService:
         detail_api = f"http://music.163.com/api/song/detail/?id={song_id}&ids=[{song_id}]"
         lyric_api = f"https://music.163.com/api/song/lyric?id={song_id}&lv=1&kv=1&tv=-1"
 
-        detail_data = await self._get_json(detail_api)
-        songs = (detail_data or {}).get("songs") or []
+        detail_data = self._require_mapping(await self._get_json(detail_api), "网易云详情接口")
+        songs = detail_data.get("songs") or []
         if not songs:
             raise ValueError("网易云歌曲详情为空")
         song = songs[0]
 
         lyric_text = ""
         try:
-            lyric_data = await self._get_json(lyric_api)
-            lyric_text = ((lyric_data or {}).get("lrc") or {}).get("lyric", "") or ""
+            lyric_data = self._require_mapping(await self._get_json(lyric_api), "网易云歌词接口")
+            lyric_text = ((lyric_data.get("lrc") or {}).get("lyric", "") or "")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"获取网易云歌词失败: {exc}")
 
@@ -704,6 +717,9 @@ class MusicService:
             return tuple(results)
 
     def _normalize_command9_items(self, payload: Any, platform: str, platform_label: str) -> list[SongItem]:
+        if not isinstance(payload, dict):
+            logger.warning(f"落月搜索接口返回了非 JSON 对象: {self._preview_payload(payload)}")
+            return []
         if not payload or payload.get("code") != 200 or not payload.get("data"):
             return []
         raw_items = payload["data"] if isinstance(payload["data"], list) else [payload["data"]]
@@ -733,15 +749,15 @@ class MusicService:
         detail_api = f"{base_url}/v2/music/{platform}?id={song_id}&quality={quality}"
         lyric_api = f"{base_url}/v2/music/{platform}/lyric?id={song_id}"
 
-        detail_data = await self._get_json(detail_api)
+        detail_data = self._require_mapping(await self._get_json(detail_api), "落月详情接口")
         if not detail_data or detail_data.get("code") != 200 or not detail_data.get("data"):
             raise ValueError("落月 API 返回空详情")
         raw = detail_data["data"]
 
         lyric_text = ""
         try:
-            lyric_data = await self._get_json(lyric_api)
-            lyric_text = ((lyric_data or {}).get("data") or {}).get("lrc", "") or ""
+            lyric_data = self._require_mapping(await self._get_json(lyric_api), "落月歌词接口")
+            lyric_text = ((lyric_data.get("data") or {}).get("lrc", "") or "")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"获取落月 API 歌词失败: {exc}")
 
@@ -1086,9 +1102,13 @@ class MusicLinkPlugin(Star):
             if direct_index < 1 or direct_index > len(songs):
                 yield event.plain_result(f"序号超出范围，请输入 1 到 {len(songs)}。")
                 return
-            detail = await self._pick_song(songs[direct_index - 1])
-            async for result in self._yield_detail_results(event, detail):
-                yield result
+            try:
+                detail = await self._pick_song(songs[direct_index - 1])
+                async for result in self._yield_detail_results(event, detail):
+                    yield result
+            except Exception as exc:  # noqa: BLE001
+                logger.error(f"直选歌曲详情失败: {exc}")
+                yield event.plain_result(f"获取歌曲详情失败: {exc}")
             return
 
         async for result in self._build_song_list_results(event, keyword, songs):

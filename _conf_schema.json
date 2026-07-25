@@ -218,8 +218,19 @@
   },
   "svg_columns": {
     "description": "图片列数",
+    "hint": "列数与音乐平台无关；网易、QQ、酷狗混合结果通常推荐 2 列。",
     "type": "int",
     "default": 2
+  },
+  "svg_column_layout_mode": {
+    "description": "歌单填充方式",
+    "hint": "row-first 按行从左到右填充；column-first 先从上到下，再填下一列。",
+    "type": "string",
+    "default": "row-first",
+    "options": [
+      "row-first",
+      "column-first"
+    ]
   },
   "svg_dark_mode": {
     "description": "深色歌单",
@@ -252,31 +263,40 @@
     "type": "int",
     "default": 20
   },
-  "command6_used_api": {
-    "description": "command6 后端",
-    "hint": "command6 获取网易云下载链接时使用的后端站点。",
+  "command6_api_urls": {
+    "description": "网易 API 地址",
+    "hint": "选择用于获取网易云直链的 API。",
     "type": "string",
     "default": "api.injahow.cn",
     "options": [
       "api.injahow.cn",
-      "meting.jmstrand.cn",
       "api.qijieya.cn",
+      "meting.jmstrand.cn",
       "metingapi.nanorocky.top"
     ]
   },
-  "luoyue_api_base_url": {
+  "luoyue_api_urls": {
     "description": "落月 API 地址",
+    "hint": "选择落月 API；酷狗需要接口支持 /v2/music/kugou。",
     "type": "string",
-    "default": "https://api.vkeys.cn"
-  },
-  "command9_platform": {
-    "description": "command9 平台",
-    "type": "string",
-    "default": "aggregation",
+    "default": "https://api.vkeys.cn",
     "options": [
-      "aggregation",
+      "https://api.vkeys.cn",
+      "http://xwl.vincentzyu233.cn:51217"
+    ]
+  },
+  "command9_platforms": {
+    "description": "落月平台",
+    "hint": "可多选；多平台会并行搜索并交替合并。酷狗需使用支持该端点的 API。",
+    "type": "list",
+    "default": [
       "netease",
       "tencent"
+    ],
+    "options": [
+      "netease",
+      "tencent",
+      "kugou"
     ]
   },
   "command9_netease_quality": {
@@ -288,5 +308,17 @@
     "description": "QQ 音质",
     "type": "int",
     "default": 8
+  },
+  "command9_kugou_quality": {
+    "description": "酷狗音质",
+    "hint": "可选 128、320、flac、high。",
+    "type": "string",
+    "default": "320",
+    "options": [
+      "128",
+      "320",
+      "flac",
+      "high"
+    ]
   }
 }

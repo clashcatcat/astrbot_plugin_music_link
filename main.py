@@ -28,6 +28,27 @@ from astrbot.core.utils.session_waiter import SessionController, session_waiter
 
 PLUGIN_VERSION = "1.0.0"
 
+PLATFORM_LABELS = {
+    "netease": "网易云",
+    "tencent": "QQ音乐",
+    "kugou": "酷狗音乐",
+}
+
+PLATFORM_TAGS = {
+    "netease": ("网易", "#e4393c"),
+    "tencent": ("QQ", "#31c27c"),
+    "kugou": ("酷狗", "#2f86ff"),
+}
+
+COMMAND6_API_URLS = {
+    "api.injahow.cn": "https://api.injahow.cn/meting/?type=url&id={id}",
+    "meting.jmstrand.cn": "https://meting.jmstrand.cn/?type=url&id={id}",
+    "api.qijieya.cn": "https://api.qijieya.cn/meting/?type=url&id={id}",
+    "metingapi.nanorocky.top": "https://metingapi.nanorocky.top/?server=netease&type=url&id={id}",
+}
+
+DEFAULT_LUOYUE_API_URL = "https://api.vkeys.cn"
+
 
 def to_bool(value: Any, default: bool = False) -> bool:
     if value is None:
@@ -70,6 +91,33 @@ def parse_cn_duration(text: Any) -> int:
     return int(match.group(1)) * 60 + int(match.group(2))
 
 
+def normalize_command9_platforms(value: Any) -> list[str]:
+    valid_platforms = {"netease", "tencent", "kugou"}
+    if value == "aggregation":
+        return ["netease", "tencent"]
+    raw_platforms = value if isinstance(value, list) else [value]
+    platforms: list[str] = []
+    for platform in raw_platforms:
+        normalized = str(platform or "").strip().lower()
+        if normalized in valid_platforms and normalized not in platforms:
+            platforms.append(normalized)
+    return platforms or ["netease"]
+
+
+def first_config_url(config: AstrBotConfig, list_key: str, legacy_key: str, default: str) -> str:
+    values = config.get(list_key)
+    if isinstance(values, list):
+        for value in values:
+            url = str(value or "").strip()
+            if url:
+                return url
+    if isinstance(values, str) and values.strip():
+        return values.strip()
+
+    legacy_value = str(config.get(legacy_key, "") or "").strip()
+    return legacy_value or default
+
+
 @dataclass
 class SongItem:
     song_id: str
@@ -103,7 +151,7 @@ class SongDetail:
     raw: dict[str, Any]
 
     def as_field_map(self) -> dict[str, str]:
-        platform_label = "网易云" if self.platform == "netease" else "QQ音乐"
+        platform_label = PLATFORM_LABELS.get(self.platform, self.platform or "未知平台")
         return {
             "id": self.song_id,
             "name": self.name,
@@ -345,6 +393,7 @@ class LocalSongListRenderer:
         theme_color = str(config.get("svg_theme_color", "#4f7cff"))
         width = max(420, to_int(config.get("svg_width"), 760))
         columns = max(1, min(4, to_int(config.get("svg_columns"), 2)))
+        layout_mode = str(config.get("svg_column_layout_mode", "row-first"))
         show_dividers = to_bool(config.get("svg_show_dividers"), True)
         show_background = to_bool(config.get("svg_show_song_background"), True)
         show_version = to_bool(config.get("svg_show_version_info"), True)
@@ -355,8 +404,9 @@ class LocalSongListRenderer:
         header_height = int(62 * scale)
         item_height = int(58 * scale)
         footer_height = int((56 if show_version else 26) * scale)
-        songs_per_col = max(1, math.ceil(len(songs) / columns))
-        total_height = header_height + songs_per_col * item_height + footer_height + padding * 2
+        items_per_column = max(1, math.ceil(len(songs) / columns))
+        rows = max(1, math.ceil(len(songs) / columns))
+        total_height = header_height + rows * item_height + footer_height + padding * 2
         height = max(int(180 * scale), total_height)
         col_width = (canvas_width - padding * 2) / columns
         card_width = col_width - int(8 * scale)
@@ -421,8 +471,12 @@ class LocalSongListRenderer:
         )
 
         for index, song in enumerate(songs):
-            col = index % columns
-            row = index // columns
+            if layout_mode == "column-first":
+                col = index // items_per_column
+                row = index % items_per_column
+            else:
+                row = index // columns
+                col = index % columns
             x = int(padding + col * col_width)
             y = int(padding + header_height + row * item_height)
 
@@ -459,7 +513,8 @@ class LocalSongListRenderer:
 
             tags: list[tuple[str, str, str]] = []
             if song.platform:
-                tags.append(("网易" if song.platform == "netease" else "QQ", "#ffffff", "#e4393c" if song.platform == "netease" else "#31c27c"))
+                platform_text, platform_color = PLATFORM_TAGS.get(song.platform, (song.platform, theme_color))
+                tags.append((platform_text, "#ffffff", platform_color))
             qtext = quality_text(song.quality)
             if qtext:
                 tags.append((qtext, theme_color, "#eef4ff" if not dark_mode else "#21262d"))
@@ -593,6 +648,14 @@ class MusicService:
     def _optional_mapping(self, payload: Any) -> dict[str, Any]:
         return payload if isinstance(payload, dict) else {}
 
+    def _luoyue_api_base_url(self) -> str:
+        return first_config_url(
+            self.config,
+            "luoyue_api_urls",
+            "luoyue_api_base_url",
+            DEFAULT_LUOYUE_API_URL,
+        ).rstrip("/")
+
     async def search_command6(self, keyword: str, limit: int) -> list[SongItem]:
         api = (
             "http://music.163.com/api/search/get/web"
@@ -631,13 +694,7 @@ class MusicService:
             )
         return items
 
-    async def get_command6_detail(self, song_id: str, use_api: str) -> SongDetail:
-        song_url_map = {
-            "api.injahow.cn": f"https://api.injahow.cn/meting/?type=url&id={song_id}",
-            "meting.jmstrand.cn": f"https://meting.jmstrand.cn/?type=url&id={song_id}",
-            "api.qijieya.cn": f"https://api.qijieya.cn/meting/?type=url&id={song_id}",
-            "metingapi.nanorocky.top": f"https://metingapi.nanorocky.top/?server=netease&type=url&id={song_id}",
-        }
+    async def get_command6_detail(self, song_id: str, api_url: str) -> SongDetail:
         detail_api = f"http://music.163.com/api/song/detail/?id={song_id}&ids=[{song_id}]"
         lyric_api = f"https://music.163.com/api/song/lyric?id={song_id}&lv=1&kv=1&tv=-1"
 
@@ -658,9 +715,7 @@ class MusicService:
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"获取网易云歌词失败: {exc}")
 
-        song_url = song_url_map.get(use_api)
-        if not song_url:
-            raise ValueError(f"不支持的 command6 直链后端: {use_api}")
+        song_url = self._build_command6_song_url(api_url, song_id)
 
         artists = "/".join(artist.get("name", "") for artist in song.get("artists", []))
         duration_seconds = to_int(song.get("duration"), 0) // 1000
@@ -681,53 +736,92 @@ class MusicService:
             raw=song,
         )
 
+    @staticmethod
+    def _build_command6_song_url(api_url: str, song_id: str) -> str:
+        endpoint = COMMAND6_API_URLS.get(api_url, api_url).strip()
+        if not endpoint:
+            raise ValueError("未配置网易 API 地址")
+        if "{id}" in endpoint:
+            return endpoint.replace("{id}", quote(song_id))
+        separator = "&" if "?" in endpoint else "?"
+        return f"{endpoint}{separator}type=url&id={quote(song_id)}"
+
     async def search_command9(
         self,
         keyword: str,
         limit: int,
-        platform: str,
+        platforms: list[str],
         netease_quality: int,
         qq_quality: int,
+        kugou_quality: str,
     ) -> list[SongItem]:
-        base_url = str(self.config.get("luoyue_api_base_url", "https://api.vkeys.cn")).rstrip("/")
-        if platform == "aggregation":
-            half_limit = max(1, limit // 2)
-            netease_url = (
-                f"{base_url}/v2/music/netease?word={quote(keyword)}"
-                f"&num={half_limit}&quality={netease_quality}"
-            )
-            qq_url = (
-                f"{base_url}/v2/music/tencent?word={quote(keyword)}"
-                f"&num={half_limit}&quality={qq_quality}"
-            )
-            netease_resp, qq_resp = await self._gather_json(netease_url, qq_url)
-            netease_items = self._normalize_command9_items(netease_resp, "netease", "网易云")
-            qq_items = self._normalize_command9_items(qq_resp, "tencent", "QQ音乐")
+        base_url = self._luoyue_api_base_url()
+        selected_platforms = normalize_command9_platforms(platforms)
+        if len(selected_platforms) > 1:
+            per_platform_limit = max(1, math.ceil(limit / len(selected_platforms)))
+            urls = [
+                (
+                    platform,
+                    f"{base_url}/v2/music/{platform}?word={quote(keyword)}"
+                    f"&num={per_platform_limit}&quality="
+                    f"{self._command9_quality(platform, netease_quality, qq_quality, kugou_quality)}",
+                )
+                for platform in selected_platforms
+            ]
+            responses = await self._gather_json(*(url for _, url in urls))
+            # Some Luoyue-compatible endpoints ignore `num`; enforce the
+            # per-platform allocation locally so the rendered list stays bounded.
+            groups = [
+                self._normalize_command9_items(response, platform, PLATFORM_LABELS[platform])[
+                    :per_platform_limit
+                ]
+                for (platform, _), response in zip(urls, responses, strict=True)
+            ]
             merged: list[SongItem] = []
-            max_len = max(len(netease_items), len(qq_items))
-            for index in range(max_len):
-                if index < len(netease_items):
-                    merged.append(netease_items[index])
-                if index < len(qq_items):
-                    merged.append(qq_items[index])
-            return merged[:limit]
+            for index in range(max((len(group) for group in groups), default=0)):
+                for group in groups:
+                    if index < len(group):
+                        merged.append(group[index])
+            return merged
 
-        quality = netease_quality if platform == "netease" else qq_quality
+        platform = selected_platforms[0]
+        quality = self._command9_quality(platform, netease_quality, qq_quality, kugou_quality)
         url = (
             f"{base_url}/v2/music/{platform}?word={quote(keyword)}"
             f"&num={limit}&quality={quality}"
         )
         data = await self._get_json(url)
-        platform_label = "网易云" if platform == "netease" else "QQ音乐"
-        return self._normalize_command9_items(data, platform, platform_label)
+        platform_label = PLATFORM_LABELS.get(platform, platform)
+        return self._normalize_command9_items(data, platform, platform_label)[:limit]
+
+    @staticmethod
+    def _command9_quality(
+        platform: str,
+        netease_quality: int,
+        qq_quality: int,
+        kugou_quality: str,
+    ) -> int | str:
+        if platform == "netease":
+            return netease_quality
+        if platform == "kugou":
+            return kugou_quality
+        return qq_quality
 
     async def _gather_json(self, *urls: str) -> tuple[Any, ...]:
         async with httpx.AsyncClient(timeout=self.timeout, follow_redirects=True) as client:
-            responses = await asyncio.gather(*[client.get(url) for url in urls])
+            responses = await asyncio.gather(*[client.get(url) for url in urls], return_exceptions=True)
             results: list[Any] = []
             for response in responses:
-                response.raise_for_status()
-                results.append(response.json())
+                if isinstance(response, Exception):
+                    logger.warning(f"落月聚合搜索请求失败: {response}")
+                    results.append({"code": 500, "data": []})
+                    continue
+                try:
+                    response.raise_for_status()
+                    results.append(response.json())
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(f"落月聚合搜索响应异常: {exc}")
+                    results.append({"code": 500, "data": []})
             return tuple(results)
 
     def _normalize_command9_items(self, payload: Any, platform: str, platform_label: str) -> list[SongItem]:
@@ -739,10 +833,14 @@ class MusicService:
         raw_items = payload["data"] if isinstance(payload["data"], list) else [payload["data"]]
         items: list[SongItem] = []
         for raw in raw_items:
+            if not isinstance(raw, dict):
+                logger.warning(f"落月搜索结果里包含异常歌曲项: {self._preview_payload(raw)}")
+                continue
             duration_seconds = parse_cn_duration(raw.get("interval"))
+            song_id = raw.get("id") or (raw.get("hash") if platform == "kugou" else "")
             items.append(
                 SongItem(
-                    song_id=str(raw.get("id", "")),
+                    song_id=str(song_id or ""),
                     source_backend="command9",
                     platform=platform,
                     platform_label=platform_label,
@@ -758,26 +856,35 @@ class MusicService:
             )
         return items
 
-    async def get_command9_detail(self, song_id: str, platform: str, quality: int) -> SongDetail:
-        base_url = str(self.config.get("luoyue_api_base_url", "https://api.vkeys.cn")).rstrip("/")
-        detail_api = f"{base_url}/v2/music/{platform}?id={song_id}&quality={quality}"
-        lyric_api = f"{base_url}/v2/music/{platform}/lyric?id={song_id}"
+    async def get_command9_detail(
+        self,
+        song_id: str,
+        platform: str,
+        quality: int | str,
+        song_raw: dict[str, Any] | None = None,
+        keyword: str = "",
+    ) -> SongDetail:
+        base_url = self._luoyue_api_base_url()
+        request_params = self._build_command9_detail_params(platform, song_id, song_raw)
+        detail_api = f"{base_url}/v2/music/{platform}?{request_params}&quality={quote(str(quality))}"
 
         detail_data = self._require_mapping(await self._get_json(detail_api), "落月详情接口")
         if not detail_data or detail_data.get("code") != 200 or not detail_data.get("data"):
             raise ValueError("落月 API 返回空详情")
-        raw = detail_data["data"]
+        raw = self._require_mapping(detail_data["data"], "落月详情数据")
 
         lyric_text = ""
         try:
+            lyric_params = self._build_command9_lyric_params(platform, song_id, song_raw, raw, keyword)
+            lyric_api = f"{base_url}/v2/music/{platform}/lyric?{lyric_params}"
             lyric_data = self._require_mapping(await self._get_json(lyric_api), "落月歌词接口")
-            lyric_text = ((lyric_data.get("data") or {}).get("lrc", "") or "")
+            lyric_text = (self._optional_mapping(lyric_data.get("data")).get("lrc", "") or "")
         except Exception as exc:  # noqa: BLE001
             logger.warning(f"获取落月 API 歌词失败: {exc}")
 
         duration_seconds = parse_cn_duration(raw.get("interval"))
         return SongDetail(
-            song_id=str(raw.get("id", "")),
+            song_id=str(raw.get("id") or raw.get("hash") or song_id),
             platform=platform,
             name=raw.get("song") or raw.get("name") or "未知歌曲",
             artist=raw.get("singer") or raw.get("artist") or "未知歌手",
@@ -791,6 +898,58 @@ class MusicService:
             kbps=raw.get("kbps") or "",
             raw=raw,
         )
+
+    def _build_command9_detail_params(
+        self,
+        platform: str,
+        song_id: str,
+        song_raw: dict[str, Any] | None,
+    ) -> str:
+        if platform != "kugou":
+            return f"id={quote(song_id)}"
+
+        raw = song_raw or {}
+        song_hash = str(raw.get("hash") or song_id or "").strip()
+        if not song_hash:
+            raise ValueError("酷狗歌曲缺少 hash，无法获取详情")
+        params = [f"hash={quote(song_hash)}"]
+        for key in ("album_id", "album_audio_id"):
+            camel_key = "albumID" if key == "album_id" else "albumAudioID"
+            value = raw.get(key) or raw.get(camel_key)
+            if value:
+                params.append(f"{key}={quote(str(value))}")
+        return "&".join(params)
+
+    def _build_command9_lyric_params(
+        self,
+        platform: str,
+        song_id: str,
+        song_raw: dict[str, Any] | None,
+        detail_raw: dict[str, Any],
+        keyword: str,
+    ) -> str:
+        if platform != "kugou":
+            return f"id={quote(song_id)}"
+
+        raw = {**(song_raw or {}), **detail_raw}
+        lyric_id = raw.get("lyric_id")
+        accesskey = raw.get("accesskey")
+        if lyric_id and accesskey:
+            return f"id={quote(str(lyric_id))}&accesskey={quote(str(accesskey))}"
+
+        song_hash = raw.get("hash") or song_id
+        if not song_hash:
+            raise ValueError("酷狗歌曲缺少歌词查询参数")
+        params = [f"hash={quote(str(song_hash))}"]
+        album_audio_id = raw.get("album_audio_id") or raw.get("albumAudioID")
+        if album_audio_id:
+            params.append(f"album_audio_id={quote(str(album_audio_id))}")
+        lyric_keyword = keyword or raw.get("song") or raw.get("name")
+        if lyric_keyword:
+            params.append(f"keyword={quote(str(lyric_keyword))}")
+        if raw.get("fmt"):
+            params.append(f"fmt={quote(str(raw['fmt']))}")
+        return "&".join(params)
 
 
 @register("astrbot_plugin_music_link", "VincentZyuApps / Codex", "AstrBot 点歌插件", "1.0.0")
@@ -1061,6 +1220,18 @@ class MusicLinkPlugin(Star):
         async for result in self._run_interactive_search(event, keyword, None, force_backend="command9"):
             yield result
 
+    @filter.command("酷狗点歌")
+    async def kugou_music(self, event: AstrMessageEvent, keyword: str):
+        """使用酷狗音乐搜索歌曲。"""
+        async for result in self._run_interactive_search(
+            event,
+            keyword,
+            None,
+            force_backend="command9",
+            force_platform="kugou",
+        ):
+            yield result
+
     async def _run_id_lookup(
         self,
         event: AstrMessageEvent,
@@ -1159,10 +1330,23 @@ class MusicLinkPlugin(Star):
         if backend == "command6":
             return await self.service.search_command6(keyword, limit)
 
-        platform = force_platform or str(self.config.get("command9_platform", "aggregation"))
+        if force_platform:
+            platforms = [force_platform]
+        else:
+            platforms = normalize_command9_platforms(
+                self.config.get("command9_platforms") or self.config.get("command9_platform")
+            )
         netease_quality = to_int(self.config.get("command9_netease_quality"), 4)
         qq_quality = to_int(self.config.get("command9_qq_quality"), 8)
-        return await self.service.search_command9(keyword, limit, platform, netease_quality, qq_quality)
+        kugou_quality = str(self.config.get("command9_kugou_quality", "320"))
+        return await self.service.search_command9(
+            keyword,
+            limit,
+            platforms,
+            netease_quality,
+            qq_quality,
+            kugou_quality,
+        )
 
     def _parse_ai_song_request(self, raw_text: str) -> tuple[str, str | None]:
         text = str(raw_text or "").strip()
@@ -1173,12 +1357,14 @@ class MusicLinkPlugin(Star):
         force_platform: str | None = None
         if any(keyword in lowered for keyword in ("qq音乐", "qq music", "qqmusic", "qq的", "腾讯音乐", "腾讯的", "腾讯")):
             force_platform = "tencent"
+        elif any(keyword in lowered for keyword in ("酷狗音乐", "酷狗", "kugou")):
+            force_platform = "kugou"
         elif any(keyword in lowered for keyword in ("网易云音乐", "网易云", "网易的", "网易", "netease")):
             force_platform = "netease"
 
         keyword = re.sub(r"^(来一首|点一首|放一首|播一首|搜一下|搜索|点歌)\s*", "", text, flags=re.IGNORECASE)
         keyword = re.sub(
-            r"(qq音乐|qq music|qqmusic|qq|腾讯音乐|腾讯|网易云音乐|网易云|网易)(的)?",
+            r"(qq音乐|qq music|qqmusic|qq|腾讯音乐|腾讯|酷狗音乐|酷狗|kugou|网易云音乐|网易云|网易)(的)?",
             "",
             keyword,
             flags=re.IGNORECASE,
@@ -1338,20 +1524,42 @@ class MusicLinkPlugin(Star):
         finally:
             event.stop_event()
 
-    async def _fetch_detail(self, song_id: str, backend: str, platform: str | None) -> SongDetail:
+    async def _fetch_detail(
+        self,
+        song_id: str,
+        backend: str,
+        platform: str | None,
+        song_raw: dict[str, Any] | None = None,
+        keyword: str = "",
+    ) -> SongDetail:
         if backend == "command6":
-            use_api = str(self.config.get("command6_used_api", "api.injahow.cn"))
-            detail = await self.service.get_command6_detail(song_id, use_api)
-        else:
-            final_platform = platform or str(self.config.get("command9_platform", "netease"))
-            if final_platform == "aggregation":
-                final_platform = "netease"
-            quality = (
-                to_int(self.config.get("command9_netease_quality"), 4)
-                if final_platform == "netease"
-                else to_int(self.config.get("command9_qq_quality"), 8)
+            api_url = first_config_url(
+                self.config,
+                "command6_api_urls",
+                "command6_used_api",
+                COMMAND6_API_URLS["api.injahow.cn"],
             )
-            detail = await self.service.get_command9_detail(song_id, final_platform, quality)
+            detail = await self.service.get_command6_detail(song_id, api_url)
+        else:
+            configured_platforms = normalize_command9_platforms(
+                self.config.get("command9_platforms") or self.config.get("command9_platform")
+            )
+            if platform is None and (len(configured_platforms) > 1 or configured_platforms[0] == "kugou"):
+                raise ValueError("多平台或酷狗模式不支持 ID 直点，请先搜索后选择歌曲")
+            final_platform = platform or configured_platforms[0]
+            if final_platform == "netease":
+                quality: int | str = to_int(self.config.get("command9_netease_quality"), 4)
+            elif final_platform == "kugou":
+                quality = str(self.config.get("command9_kugou_quality", "320"))
+            else:
+                quality = to_int(self.config.get("command9_qq_quality"), 8)
+            detail = await self.service.get_command9_detail(
+                song_id,
+                final_platform,
+                quality,
+                song_raw,
+                keyword,
+            )
 
         max_duration = to_int(self.config.get("max_duration_seconds"), 1800)
         if detail.duration_seconds > max_duration:
@@ -1359,7 +1567,13 @@ class MusicLinkPlugin(Star):
         return detail
 
     async def _pick_song(self, song: SongItem) -> SongDetail:
-        return await self._fetch_detail(song.song_id, song.source_backend, song.platform)
+        return await self._fetch_detail(
+            song.song_id,
+            song.source_backend,
+            song.platform,
+            song.raw,
+            song.name,
+        )
 
     def _build_song_list_text(self, keyword: str, songs: list[SongItem], footer: str) -> str:
         lines = [f"点歌结果: {keyword}"]

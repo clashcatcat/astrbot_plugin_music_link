@@ -23,7 +23,7 @@ from astrbot.core.agent.run_context import ContextWrapper
 from astrbot.core.agent.tool import FunctionTool, ToolExecResult
 from astrbot.core.astr_agent_context import AstrAgentContext
 from astrbot.core.star.star_tools import StarTools
-from astrbot.core.utils.session_waiter import SessionController, session_waiter
+from astrbot.core.utils.session_waiter import SessionController, SessionFilter, session_waiter
 
 
 PLUGIN_VERSION = "1.0.0"
@@ -48,6 +48,13 @@ COMMAND6_API_URLS = {
 }
 
 DEFAULT_LUOYUE_API_URL = "https://api.vkeys.cn"
+
+
+class MusicSelectionSessionFilter(SessionFilter):
+    """Keep a group's song-selection session scoped to its requesting user."""
+
+    def filter(self, event: AstrMessageEvent) -> str:
+        return f"music-link-selection:{event.unified_msg_origin}:{event.get_sender_id()}"
 
 
 def to_bool(value: Any, default: bool = False) -> bool:
@@ -1171,15 +1178,27 @@ class MusicLinkPlugin(Star):
         primary_components, deferred_messages = await self._build_detail_components(detail)
         yield event.chain_result(self._wrap_primary_with_forward(event, primary_components))
         for message in deferred_messages:
-            yield event.chain_result(message)
+            await self._send_deferred_media(event, message)
         await self._send_music_card(event, detail)
 
     async def _send_detail_followups(self, event: AstrMessageEvent, detail: SongDetail) -> None:
         primary_components, deferred_messages = await self._build_detail_components(detail)
         await event.send(event.chain_result(self._wrap_primary_with_forward(event, primary_components)))
         for message in deferred_messages:
-            await event.send(event.chain_result(message))
+            await self._send_deferred_media(event, message)
         await self._send_music_card(event, detail)
+
+    async def _send_deferred_media(
+        self,
+        event: AstrMessageEvent,
+        message: list[Comp.BaseMessageComponent],
+    ) -> None:
+        try:
+            await event.send(event.chain_result(message))
+        except Exception as exc:  # noqa: BLE001
+            # QQ's client-side voice service can time out after the song details
+            # have already been fetched successfully; do not fail the whole request.
+            logger.warning(f"发送音频/文件失败，已忽略: {exc}")
 
     @filter.command_group("music")
     def music(self):
@@ -1445,7 +1464,7 @@ class MusicLinkPlugin(Star):
             finally:
                 controller.stop()
 
-        await waiter(event)
+        await waiter(event, session_filter=MusicSelectionSessionFilter())
 
     async def _send_song_menu_and_wait(
         self,

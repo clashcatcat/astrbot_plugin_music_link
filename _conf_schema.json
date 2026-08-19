@@ -320,5 +320,23 @@
       "flac",
       "high"
     ]
+  },
+  "enable_qq_keyboard": {
+    "description": "QQ 官方机器人按钮",
+    "hint": "在 QQ 官方机器人平台上发送选歌按钮：一行一个通栏按钮，标签为「序号. 歌名 - 歌手」，每页 4 首，末行为「下一页 / 退出」。",
+    "type": "bool",
+    "default": true
+  },
+  "qq_keyboard_callback": {
+    "description": "按钮使用回调模式",
+    "hint": "开启（推荐）：回调按钮，点一下直接触发，聊天里不会出现你发的序号。关闭：指令按钮，点击会以你的身份发出一条序号消息。若开启后点按钮无反应，说明该部署收不到 interaction 事件，请关闭本项回退。",
+    "type": "bool",
+    "default": true
+  },
+  "qq_recall_after_pick": {
+    "description": "选完歌后撤回选歌卡片",
+    "hint": "开启：点按钮选歌（或发送序号/退出）后，自动撤回那张带按钮的选歌卡片，避免过期按钮留在聊天里被反复点。仅 QQ 官方机器人有效。",
+    "type": "bool",
+    "default": true
   }
 }

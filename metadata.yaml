@@ -2,7 +2,7 @@ name: astrbot_plugin_music_link
 display_name: music-link AstrBot 版
 desc: 支持网易云、QQ 音乐、酷狗音乐搜索、选歌、歌单图片、音频文件发送和音乐卡片的 AstrBot 点歌插件。
 short_desc: 搜索歌曲并返回菜单、音频、文件或音乐卡片。
-version: v1.0.0
+version: v1.3.0
 author: Catcat
 repo: https://github.com/clashcatcat/astrbot_plugin_music_link
 astrbot_version: ">=4.16,<5"
